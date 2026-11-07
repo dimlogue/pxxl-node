@@ -1,11 +1,1 @@
-{
-  "name": "pxxl-xray-ws-tls",
-  "version": "1.0.0",
-  "private": true,
-  "main": "server.js",
-  "scripts": {
-    "start": "node server.js",
-    "build": "node setup.js"
-  },
-  "engines": { "node": ">=18" }
-}
+{"description":"Free AI chat page (static file server).","engines":{"node":">=18"},"main":"server.js","name":"free-chat","private":true,"scripts":{"start":"node server.js"},"version":"1.0.0"}

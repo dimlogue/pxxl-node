@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>我的 AI 聊天</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif; background: #f5f5f5; height: 100dvh; display: flex; flex-direction: column; }
+  header { background: #fff; border-bottom: 1px solid #e5e5e5; padding: 10px 14px; }
+  header h1 { font-size: 17px; font-weight: 600; }
+  header p { font-size: 12px; color: #888; margin-top: 2px; }
+  .settings { display: flex; gap: 8px; margin-top: 8px; flex-wrap: wrap; }
+  .settings select, .settings input { flex: 1; min-width: 0; padding: 8px 10px; font-size: 14px; border: 1px solid #ddd; border-radius: 8px; background: #fff; }
+  .settings button { padding: 8px 14px; font-size: 14px; border: none; border-radius: 8px; background: #07c160; color: #fff; }
+  #chat { flex: 1; overflow-y: auto; padding: 14px; display: flex; flex-direction: column; gap: 10px; }
+  .msg { max-width: 85%; padding: 10px 12px; border-radius: 12px; font-size: 15px; line-height: 1.6; white-space: pre-wrap; word-break: break-word; }
+  .msg.user { align-self: flex-end; background: #95ec69; border-bottom-right-radius: 4px; }
+  .msg.ai { align-self: flex-start; background: #fff; border-bottom-left-radius: 4px; box-shadow: 0 1px 2px rgba(0,0,0,.06); }
+  .msg.err { align-self: flex-start; background: #fdecea; color: #b3261e; }
+  .msg.typing { color: #888; }
+  #inputbar { background: #fff; border-top: 1px solid #e5e5e5; padding: 10px 12px calc(10px + env(safe-area-inset-bottom)); display: flex; gap: 8px; }
+  #inputbar textarea { flex: 1; resize: none; border: 1px solid #ddd; border-radius: 10px; padding: 10px 12px; font-size: 15px; font-family: inherit; max-height: 120px; }
+  #inputbar button { padding: 0 18px; border: none; border-radius: 10px; background: #07c160; color: #fff; font-size: 15px; }
+  #inputbar button:disabled { background: #ccc; }
+  .hint { font-size: 12px; color: #999; text-align: center; padding: 4px 14px 10px; background: #fff; }
+</style>
+</head>
+<body>
+<header>
+  <h1>我的 AI 聊天</h1>
+  <p>默认免密钥直接聊；想用更好的免费模型再粘贴密钥（密钥只存在你自己手机浏览器里）</p>
+  <div class="settings">
+    <select id="provider">
+      <option value="pollinations">免密钥，直接聊（Pollinations 免费）</option>
+      <option value="maritaca">Maritaca S5-free（免费，需密钥）</option>
+      <option value="inferx">InferX DeepSeek 免费版（需密钥）</option>
+      <option value="routeopen">RouteOpen DeepSeek 免费版（每天 20 万，需密钥）</option>
+    </select>
+    <input id="apikey" type="password" placeholder="粘贴 API Key（只存本机）" autocomplete="off">
+    <button id="savekey">保存</button>
+    <button id="clear" style="background:#999;">清空对话</button>
+  </div>
+</header>
+<div id="chat"></div>
+<div class="hint">密钥和聊天记录只保存在这台设备上。换设备要重新粘贴密钥。</div>
+<div id="inputbar">
+  <textarea id="text" rows="1" placeholder="输入消息…"></textarea>
+  <button id="send">发送</button>
+</div>
+<script>
+const PROVIDERS = {
+  pollinations: { url: 'https://text.pollinations.ai/openai', model: 'openai', name: 'Pollinations', noKey: true },
+  maritaca: { url: 'https://chat.maritaca.ai/api/chat/completions', model: 'S5-free', name: 'Maritaca S5-free' },
+  inferx: { url: 'https://model.inferx.net/endpoints/v1/chat/completions', model: 'deepseek-v4.1-flash-1017-basic', name: 'InferX DeepSeek' },
+  routeopen: { url: 'https://hashneuron.space/v1/chat/completions', model: 'deepseek-v4.1-flash-free', name: 'RouteOpen DeepSeek' }
+};
+const chatEl = document.getElementById('chat');
+const textEl = document.getElementById('text');
+const sendBtn = document.getElementById('send');
+const providerEl = document.getElementById('provider');
+const keyEl = document.getElementById('apikey');
+const saveBtn = document.getElementById('savekey');
+let history = [];
+
+function loadSettings() {
+  const p = localStorage.getItem('chat_provider') || 'pollinations';
+  providerEl.value = p;
+  const k = localStorage.getItem('chat_key_' + p) || '';
+  keyEl.value = k;
+  keyEl.placeholder = k ? '已保存密钥（可替换）' : '粘贴 API Key（只存本机）';
+  keyEl.disabled = PROVIDERS[p].noKey;
+  keyEl.placeholder = PROVIDERS[p].noKey ? '这个模型不用密钥，直接聊' : (k ? '已保存密钥（可替换）' : '粘贴 API Key（只存本机）');
+  saveBtn.disabled = !!PROVIDERS[p].noKey;
+}
+providerEl.addEventListener('change', () => {
+  localStorage.setItem('chat_provider', providerEl.value);
+  loadSettings();
+});
+saveBtn.addEventListener('click', () => {
+  const k = keyEl.value.trim();
+  if (!k) { alert('先粘贴密钥'); return; }
+  localStorage.setItem('chat_key_' + providerEl.value, k);
+  keyEl.value = k;
+  alert('已保存到本机浏览器');
+});
+document.getElementById('clear').addEventListener('click', () => {
+  history = [];
+  localStorage.removeItem('chat_history');
+  chatEl.innerHTML = '';
+  addMsg('ai', '对话已清空，可以重新聊了。');
+});
+function saveHistory() {
+  try { localStorage.setItem('chat_history', JSON.stringify(history.slice(-40))); } catch (e) {}
+}
+function loadHistory() {
+  try {
+    const h = JSON.parse(localStorage.getItem('chat_history') || '[]');
+    if (Array.isArray(h) && h.length) {
+      history = h;
+      h.forEach(m => addMsg(m.role === 'user' ? 'user' : 'ai', m.content));
+      return true;
+    }
+  } catch (e) {}
+  return false;
+}
+function addMsg(role, text) {
+  const div = document.createElement('div');
+  div.className = 'msg ' + (role === 'user' ? 'user' : role === 'err' ? 'err' : 'ai');
+  div.textContent = text;
+  chatEl.appendChild(div);
+  chatEl.scrollTop = chatEl.scrollHeight;
+  return div;
+}
+textEl.addEventListener('input', () => {
+  textEl.style.height = 'auto';
+  textEl.style.height = Math.min(textEl.scrollHeight, 120) + 'px';
+});
+textEl.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
+});
+sendBtn.addEventListener('click', send);
+
+async function send() {
+  const text = textEl.value.trim();
+  if (!text || sendBtn.disabled) return;
+  const prov = PROVIDERS[providerEl.value];
+  const key = (localStorage.getItem('chat_key_' + providerEl.value) || '').trim();
+  if (!prov.noKey && !key) { alert('这个模型要先在上面粘贴 API Key 并点保存（或先用免密钥那个）'); keyEl.focus(); return; }
+  addMsg('user', text);
+  history.push({ role: 'user', content: text });
+  saveHistory();
+  textEl.value = '';
+  textEl.style.height = 'auto';
+  sendBtn.disabled = true;
+  const typing = addMsg('ai', '正在思考…');
+  typing.classList.add('typing');
+  try {
+    const headers = { 'Content-Type': 'application/json' };
+    if (!prov.noKey) headers['Authorization'] = 'Bearer ' + key;
+    const res = await fetch(prov.url, {
+      method: 'POST',
+      headers: headers,
+      body: JSON.stringify({ model: prov.model, messages: history, max_tokens: 2048 })
+    });
+    if (!res.ok) {
+      const t = await res.text();
+      throw new Error('请求失败 ' + res.status + '：' + t.slice(0, 200));
+    }
+    const data = await res.json();
+    const reply = (data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content) || '';
+    if (!reply) throw new Error('模型没有返回内容');
+    typing.classList.remove('typing');
+    typing.textContent = reply;
+    history.push({ role: 'assistant', content: reply });
+    saveHistory();
+  } catch (err) {
+    typing.classList.remove('typing');
+    typing.className = 'msg err';
+    typing.textContent = '出错了：' + err.message + '\n（401 是密钥不对，429 是免费额度忙，等一会再试）';
+  }
+  chatEl.scrollTop = chatEl.scrollHeight;
+  sendBtn.disabled = false;
+}
+loadSettings();
+if (!loadHistory()) {
+  addMsg('ai', '你好，默认就是免密钥的，直接输入就能聊。想换更好的免费模型（Maritaca、InferX、RouteOpen），在上面选、粘贴密钥点保存就行。');
+}
+</script>
+</body>
+</html>
